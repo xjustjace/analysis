@@ -1,42 +1,121 @@
-from nltk.sentiment import SentimentIntensityAnalyzer
-import numpy as np
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.graph_objects as go
+import re
+from nltk.sentiment import SentimentIntensityAnalyzer
+from collections import Counter
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import roc_curve, auc, classification_report
+from sklearn.ensemble import RandomForestClassifier
+from statsmodels.tsa.seasonal import seasonal_decompose
+from lifelines import KaplanMeierFitter
+import networkx as nx
+from sklearn.cluster import DBSCAN
+import folium
+from scipy import stats
+# Load the data from the Tripsit files
+file_paths = [
+    '/mnt/disks/data/analysis/combined_tripsit.csv',
+    '/mnt/disks/data/analysis/open_tripsit-2_page_1.csv',
+    '/mnt/disks/data/analysis/web-tripsit-2_page_1.csv',
+    '/mnt/disks/data/analysis/web-tripsit-1-page_1.csv'
+]
+# Full list of substances grouped by categories with their variations
+substances = {
+    "Cannabis": ["cannabis", "marijuana", "hashish", "weed", "pot", "bud", "ganja", "grass", "dope", "reefer"],
+    "Cocaine": ["cocaine", "powder", "crack", "coke", "snow", "rock", "freebase", "blow", "nose candy", "flake"],
+    "Opioids": ["heroin", "morphine", "codeine", "fentanyl", "oxycodone", "hydrocodone", "oxymorphone", "tramadol", "methadone", "buprenorphine"],
+    "Amphetamine-type stimulants": ["methamphetamine", "mdma", "ecstasy", "amphetamine", "speed", "crystal meth", "ice", "dexedrine", "adderall", "ritalin"],
+    "Hallucinogens": ["lsd", "psilocybin", "dmt", "mescaline", "ayahuasca", "ibogaine", "salvia divinorum", "2c-b", "2c-i", "dox"],
+    "Dissociatives": ["ketamine", "pcp", "dxm", "nitrous oxide", "mxe", "dck", "3-meo-pcp", "o-pce", "deschloroketamine", "diphenidine"],
+    "Synthetic cannabinoids": ["k2", "spice", "jwh-018", "jwh-073", "am-2201", "ab-fubinaca", "ab-chminaca", "5f-adb", "5f-akb48", "mdmb-fubinaca"],
+    "Synthetic cathinones": ["bath salts", "mephedrone", "mdpv", "alpha-pvp", "4-mmc", "3-mmc", "4-mec", "3-cmc", "pentedrone", "ethylone"],
+    "Phenethylamines": ["2c-b", "2c-i", "dox", "dom", "dob", "doi", "2c-t-7", "2c-e", "2c-c", "2c-d"],
+    "Tryptamines": ["5-meo-dmt", "dpt", "dmt", "psilocin", "psilocybin", "amt", "5-meo-mipt", "5-meo-dipt", "5-meo-dalt", "5-meo-dipt"],
+    "Benzodiazepines": ["diazepam", "alprazolam", "xanax", "benzos", "clonazepam", "lorazepam", "bars", "flunitrazepam", "temazepam", "oxazepam", "nitrazepam", "bromazepam", "chlordiazepoxide"],
+    "Barbiturates": ["phenobarbital", "secobarbital", "amobarbital", "butalbital", "pentobarbital", "thiopental", "thiamylal", "methohexital", "aprobarbital", "hexobarbital"],
+    "Z-drugs": ["zolpidem", "zaleplon", "zopiclone", "eszopiclone", "zolimidine", "zoplicone", "indiplon", "zaleplon", "zopiclone", "eszopiclone"],
+    "GHB": ["ghb", "gbl", "bd", "1,4-butanediol", "gamma-hydroxybutyric acid", "gamma-butyrolactone", "1,4-butanediol", "gamma-hydroxybutyrate", "gamma-hydroxybutanoic acid"], 
+    "Prescription stimulants": ["amphetamine", "methylphenidate", "modafinil", "armodafinil", "dextroamphetamine", "lisdexamfetamine", "phentermine", "benzphetamine", "diethylpropion", "phendimetrazine"],
+    "Inhalants": ["solvents", "aerosols", "gases", "nitrites", "amyl nitrite", "butyl nitrite", "cyclohexyl nitrite", "isobutyl nitrite", "isopropyl nitrite", "nitrous oxide"],
+    # Note: 'Others' category can include any additional substances not listed above
+    "Others": ["dextromethorphan", "dxm", "loperamide", "pseudoephedrine", "diphenhydramine", "acetaminophen", "ibuprofen", "aspirin", "codeine"]
 
-# Assuming 'topics_from_topic_modeling' and 'topic_assignments' are available from topic modeling
-# topics_from_topic_modeling: Dictionary with topic IDs and their keywords
-# topic_assignments: List with a topic ID assigned to each message
-
-def enhanced_analyze_sentiment(messages, topic_assignments, topics_from_topic_modeling):
+}
+# Flatten the list of substances for pattern matching
+substance_list = [item for sublist in substances.values() for item in sublist]
+# Data Loading Function
+def load_data(file_paths):
+    data_frames = []
+    for file_path in file_paths:
+        df = pd.read_csv(file_path, error_bad_lines=False, warn_bad_lines=True)
+        data_frames.append(df)
+    combined_df = pd.concat(data_frames, ignore_index=True)
+    return combined_df
+# Text Preprocessing and Substance Mention Counting Function
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\\s]', '', text)
+    return text
+def count_substance_mentions(message, substances):
+    message = clean_text(message)
+    return Counter(substance for substance in substances if substance in message)
+# Descriptive Statistics Function
+def descriptive_statistics(data):
+    desc_stats = data.describe(include='all')
+    return desc_stats
+# Longitudinal Analysis Function
+def longitudinal_analysis(data, time_var, target_var, freq='M', save_csv=False):
+    data[time_var] = pd.to_datetime(data[time_var])
+    data.set_index(time_var, inplace=True)
+    data_resampled = data[target_var].resample(freq).mean()
+    
+    result = seasonal_decompose(data_resampled, model='additive')
+    result.plot()
+    plt.show()
+    if save_csv:
+        data_resampled.to_csv(f'{target_var}_trends.csv')
+    return data_resampled
+# Predictive Modeling Function
+def predictive_modeling(data, features, target, model, param_grid, scoring='roc_auc'):
+    X_train, X_test, y_train, y_test = train_test_split(data[features], data[target], test_size=0.3, random_state=42)
+    
+    grid = GridSearchCV(model, param_grid, scoring=scoring, cv=5, n_jobs=-1)
+    grid.fit(X_train, y_train)
+    best_model = grid.best_estimator_
+    predictions = best_model.predict_proba(X_test)[:, 1]
+    fpr, tpr, _ = roc_curve(y_test, predictions)
+    roc_auc = auc(fpr, tpr)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name=f'ROC (AUC = {roc_auc:.2f})'))
+    fig.update_layout(title='ROC Curve', xaxis_title='False Positive Rate', yaxis_title='True Positive Rate')
+    fig.show()
+    return best_model, grid.best_params_, roc_auc
+# Network Analysis Function
+def network_analysis(nodes, edges):
+    G = nx.Graph()
+    G.add_nodes_from(nodes)
+    G.add_edges_from(edges)
+    
+    pos = nx.spring_layout(G)
+    centrality = nx.degree_centrality(G)
+    communities = nx.community.greedy_modularity_communities(G)
+    # Visualization code to be added
+    return centrality, communities
+# Spatial Clustering Function
+def spatial_clustering(data, spatial_cols, eps=0.01, min_samples=5):
+    coords = data[spatial_cols].values
+    db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords)
+    data['cluster'] = db.labels_
+    
+    # Visualization code to be added
+    return data
+# Sentiment Analysis
+def analyze_sentiment(messages):
     sia = SentimentIntensityAnalyzer()
-    
-    # Analyze sentiment of each message
     sentiment_scores = [sia.polarity_scores(message) for message in messages]
-    
-    # Adjust sentiment scores based on context
-    contextual_scores = [adjust_score_based_on_context(score, message) for score, message in zip(sentiment_scores, messages)]
-    
-    # Aggregate sentiment scores for overall sentiment
-    avg_sentiment = np.mean([score['compound'] for score in contextual_scores])
-    
-    # Sentiment over time with a 7-day rolling average
-    sentiment_over_time = pd.Series([score['compound'] for score in contextual_scores]).rolling(window=7).mean()
-    
-    # Sentiment by topic
-    sentiment_by_topic = analyze_sentiment_by_topic(messages, topic_assignments, topics_from_topic_modeling, contextual_scores)
-
-    return contextual_scores, avg_sentiment, sentiment_over_time, sentiment_by_topic
-
-def adjust_score_based_on_context(score, message):
-    # Logic to adjust sentiment scores based on the context of the message
-    # This could involve checking for the presence of key terms related to harm reduction and adjusting the score accordingly
-    adjusted_score = score  # Placeholder for actual logic
-    return adjusted_score
-
-def analyze_sentiment_by_topic(messages, topic_assignments, topics, scores):
-    # Analyze sentiment within specific topics
-    sentiment_by_topic = {}
-    for topic_id, topic_keywords in topics.items():
-        topic_messages_indices = [i for i, topic in enumerate(topic_assignments) if topic == topic_id]
-        topic_scores = [scores[i]['compound'] for i in topic_messages_indices]
-        sentiment_by_topic[topic_id] = np.mean(topic_scores)
-    return sentiment_by_topic
+    return sentiment_scores
+"""
+0 comments on commit 3cd4636
