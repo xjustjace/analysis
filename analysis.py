@@ -15,13 +15,16 @@ import networkx as nx
 from sklearn.cluster import DBSCAN
 import folium
 from scipy import stats
-# Load the data from the Tripsit files
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+# Specify the file paths
 file_paths = [
     '/mnt/disks/data/analysis/combined_tripsit.csv',
     '/mnt/disks/data/analysis/open_tripsit-2_page_1.csv',
     '/mnt/disks/data/analysis/web-tripsit-2_page_1.csv',
     '/mnt/disks/data/analysis/web-tripsit-1-page_1.csv'
 ]
+
 # Full list of substances grouped by categories with their variations
 substances = {
     "Cannabis": ["cannabis", "marijuana", "hashish", "weed", "pot", "bud", "ganja", "grass", "dope", "reefer"],
@@ -37,47 +40,79 @@ substances = {
     "Benzodiazepines": ["diazepam", "alprazolam", "xanax", "benzos", "clonazepam", "lorazepam", "bars", "flunitrazepam", "temazepam", "oxazepam", "nitrazepam", "bromazepam", "chlordiazepoxide"],
     "Barbiturates": ["phenobarbital", "secobarbital", "amobarbital", "butalbital", "pentobarbital", "thiopental", "thiamylal", "methohexital", "aprobarbital", "hexobarbital"],
     "Z-drugs": ["zolpidem", "zaleplon", "zopiclone", "eszopiclone", "zolimidine", "zoplicone", "indiplon", "zaleplon", "zopiclone", "eszopiclone"],
-    "GHB": ["ghb", "gbl", "bd", "1,4-butanediol", "gamma-hydroxybutyric acid", "gamma-butyrolactone", "1,4-butanediol", "gamma-hydroxybutyrate", "gamma-hydroxybutanoic acid"], 
+    "GHB": ["ghb", "gbl", "bd", "1,4-butanediol", "gamma-hydroxybutyric acid", "gamma-butyrolactone", "1,4-butanediol", "gamma-hydroxybutyrate", "gamma-hydroxybutanoic acid"],
     "Prescription stimulants": ["amphetamine", "methylphenidate", "modafinil", "armodafinil", "dextroamphetamine", "lisdexamfetamine", "phentermine", "benzphetamine", "diethylpropion", "phendimetrazine"],
     "Inhalants": ["solvents", "aerosols", "gases", "nitrites", "amyl nitrite", "butyl nitrite", "cyclohexyl nitrite", "isobutyl nitrite", "isopropyl nitrite", "nitrous oxide"],
-    # Note: 'Others' category can include any additional substances not listed above
     "Others": ["dextromethorphan", "dxm", "loperamide", "pseudoephedrine", "diphenhydramine", "acetaminophen", "ibuprofen", "aspirin", "codeine"]
-
 }
+
 # Flatten the list of substances for pattern matching
 substance_list = [item for sublist in substances.values() for item in sublist]
+
 # Data Loading Function
 def load_data(file_paths):
+    """
+    Load data from a list of CSV file paths and concatenate them into a single DataFrame.
+    """
     data_frames = []
     for file_path in file_paths:
         df = pd.read_csv(file_path, error_bad_lines=False, warn_bad_lines=True)
         data_frames.append(df)
     combined_df = pd.concat(data_frames, ignore_index=True)
     return combined_df
+
 # Text Preprocessing and Substance Mention Counting Function
 def clean_text(text):
+    """
+    Normalize text data by converting to lowercase and removing special characters.
+    """
     text = text.lower()
-    text = re.sub(r'[^a-z0-9\\s]', '', text)
+    text = re.sub(r'[^a-z0-9\s]', '', text)
     return text
-def count_substance_mentions(message, substances):
+
+def count_substance_mentions(message, substance_list):
+    """
+    Count mentions of substances in a given message.
+    """
     message = clean_text(message)
-    return Counter(substance for substance in substances if substance in message)
+    return Counter(substance for substance in substance_list if substance in message)
+
 # Descriptive Statistics Function
 def descriptive_statistics(data):
+    """
+    Compute and return descriptive statistics for a given DataFrame.
+    """
     desc_stats = data.describe(include='all')
     return desc_stats
 # Longitudinal Analysis Function
-def longitudinal_analysis(data, time_var, target_var, freq='M', save_csv=False):
+def longitudinal_analysis(data, time_var, target_var, freq='M'):
+    """
+    Perform longitudinal analysis on the given dataset to identify trends and patterns over time.
+
+    Parameters:
+    - data (pd.DataFrame): DataFrame containing the time series data.
+    - time_var (str): Name of the column representing time.
+    - target_var (str): Name of the column representing the variable of interest.
+    - freq (str): Frequency of the time series data ('M' for monthly, 'D' for daily, etc.).
+
+    Returns:
+    - DecomposeResult: Object with seasonal, trend, and residual components of the time series.
+    """
+    # Convert the time variable to datetime and set it as the index
     data[time_var] = pd.to_datetime(data[time_var])
     data.set_index(time_var, inplace=True)
+
+    # Resample the data according to the specified frequency and compute mean
     data_resampled = data[target_var].resample(freq).mean()
-    
+
+    # Decompose the time series data to identify trend, seasonality, and residuals
     result = seasonal_decompose(data_resampled, model='additive')
+
+    # Plot the decomposition
     result.plot()
     plt.show()
-    if save_csv:
-        data_resampled.to_csv(f'{target_var}_trends.csv')
-    return data_resampled
+
+    return result
 # Predictive Modeling Function
 def predictive_modeling(data, features, target, model, param_grid, scoring='roc_auc'):
     X_train, X_test, y_train, y_test = train_test_split(data[features], data[target], test_size=0.3, random_state=42)
